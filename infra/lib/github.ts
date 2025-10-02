@@ -128,6 +128,22 @@ export class GithubOidcStack extends Stack {
       })
     );
 
+    ghRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: "PassCdkCfnExecRole",
+        actions: ["iam:PassRole"],
+        resources: [
+          // CloudFormation execution role created by 'cdk bootstrap'
+          `arn:aws:iam::${this.account}:role/cdk-hnb659fds-cfn-exec-role-*`,
+        ],
+        conditions: {
+          StringEquals: {
+            "iam:PassedToService": "cloudformation.amazonaws.com",
+          },
+        },
+      })
+    );
+
     new CfnOutput(this, "GitHubActionsRoleArn", { value: ghRole.roleArn });
   }
 }
