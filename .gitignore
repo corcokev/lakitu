@@ -24,6 +24,7 @@ yarn-error.log*
 infra/cdk.out/
 infra/node_modules/
 infra/package-lock.json
+infra/dist/
 
 # === React Frontend ===
 frontend/dist/
