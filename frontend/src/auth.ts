@@ -41,6 +41,33 @@ export function initAuth() {
   // Casts are used because Amplify.configure accepts multiple shapes.
   Amplify.configure({ ...(config as any), storage: localStorageAdapter } as any);
 
+  // Debug helpers: expose helpers on window so we can call them from the browser console
+  // without using dynamic imports. These are safe to keep but can be removed later.
+  try {
+    (window as any).__lakitu_fetchSession = async (force = false) => {
+      try {
+        const s = await fetchAuthSession((force ? { forceRefresh: true } : undefined) as any);
+        console.log('__lakitu_fetchSession result:', s);
+        return s;
+      } catch (e) {
+        console.error('__lakitu_fetchSession error:', e);
+        throw e;
+      }
+    };
+    (window as any).__lakitu_inspectStorage = () => {
+      try {
+        console.log('localStorage keys:', Object.keys(localStorage));
+        console.log('localStorage preview:', Object.fromEntries(Object.keys(localStorage).map(k => [k, (localStorage.getItem(k)||'').slice(0,200)])));
+        console.log('sessionStorage keys:', Object.keys(sessionStorage));
+        console.log('document.cookie:', document.cookie.slice(0,500));
+      } catch (e) {
+        console.warn('__lakitu_inspectStorage error:', e);
+      }
+    };
+  } catch (e) {
+    /* ignore in restrictive environments */
+  }
+
   // Finalize Hosted UI redirect if we were just sent back with ?code=...&state=...
   completeHostedUiRedirect().catch(() => {
     /* nothing to finalize / ignore */
