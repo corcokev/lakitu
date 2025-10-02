@@ -30,9 +30,16 @@ export function initAuth() {
     },
   };
 
-  // Ensure Amplify uses browser localStorage for persistence (avoid in-memory storage)
-  // Amplify.configure accepts a non-ResourcesConfig object too, so cast to any to satisfy TS.
-  Amplify.configure({ ...(config as any), storage: window.localStorage } as any);
+  // Use a minimal storage adapter (avoid passing host objects directly)
+  const localStorageAdapter = {
+    getItem: (k: string) => window.localStorage.getItem(k),
+    setItem: (k: string, v: string) => window.localStorage.setItem(k, v),
+    removeItem: (k: string) => window.localStorage.removeItem(k),
+  };
+
+  // Configure Amplify with the app resources and the storage adapter.
+  // Casts are used because Amplify.configure accepts multiple shapes.
+  Amplify.configure({ ...(config as any), storage: localStorageAdapter } as any);
 
   // Finalize Hosted UI redirect if we were just sent back with ?code=...&state=...
   completeHostedUiRedirect().catch(() => {
@@ -43,46 +50,12 @@ export function initAuth() {
 async function completeHostedUiRedirect() {
   const params = new URLSearchParams(window.location.search);
   if (params.has("code") && params.has("state")) {
-    // Touch Amplify so it completes the code exchange & stores the session.
-    // In early v6, calling getCurrentUser() or fetchAuthSession() triggers this.
+    // Exchange the authorization code for tokens and populate Amplify's session.
     try {
-      await getCurrentUser().catch(async (err) => {
-        // log the error before attempting the session exchange
-        console.warn(
-          "getCurrentUser failed during hosted UI finalization:",
-          err
-        );
-        await fetchAuthSession().catch((e) => {
-          console.error(
-            "fetchAuthSession failed during hosted UI finalization:",
-            e
-          );
-          throw e;
-        });
-        // Log the session and storage contents to help diagnose persistence issues
-        try {
-          const s = await fetchAuthSession();
-          console.log('fetchAuthSession succeeded during hosted UI finalization:', s);
-        } catch (err) {
-          console.warn('fetchAuthSession succeeded earlier but reading session now failed:', err);
-        }
-        // Force a refresh to ensure tokens are parsed/stored by the library
-        try {
-          const s2 = await fetchAuthSession({ forceRefresh: true } as any);
-          console.log('fetchAuthSession(forceRefresh:true) result:', s2);
-        } catch (err) {
-          console.warn('fetchAuthSession(forceRefresh) failed:', err);
-        }
-        try {
-          console.log('localStorage keys after hosted UI finalization:', Object.keys(localStorage));
-          const preview = Object.fromEntries(Object.keys(localStorage).map(k => [k, (localStorage.getItem(k) || '').slice(0,200)]));
-          console.log('localStorage preview:', preview);
-        } catch (err) {
-          console.warn('Could not read localStorage:', err);
-        }
-      });
+      // forceRefresh ensures the library parses and persists any returned tokens
+      await fetchAuthSession({ forceRefresh: true } as any);
     } catch (err) {
-      console.error("Error finalizing hosted UI redirect:", err);
+      console.error("Error finalizing hosted UI redirect (token exchange):", err);
     } finally {
       // Clean the URL so code/state aren’t left around
       const url = new URL(window.location.href);
