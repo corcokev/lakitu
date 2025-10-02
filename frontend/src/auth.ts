@@ -57,6 +57,20 @@ async function completeHostedUiRedirect() {
           );
           throw e;
         });
+        // Log the session and storage contents to help diagnose persistence issues
+        try {
+          const s = await fetchAuthSession();
+          console.log('fetchAuthSession succeeded during hosted UI finalization:', s);
+        } catch (err) {
+          console.warn('fetchAuthSession succeeded earlier but reading session now failed:', err);
+        }
+        try {
+          console.log('localStorage keys after hosted UI finalization:', Object.keys(localStorage));
+          const preview = Object.fromEntries(Object.keys(localStorage).map(k => [k, (localStorage.getItem(k) || '').slice(0,200)]));
+          console.log('localStorage preview:', preview);
+        } catch (err) {
+          console.warn('Could not read localStorage:', err);
+        }
       });
     } catch (err) {
       console.error("Error finalizing hosted UI redirect:", err);
