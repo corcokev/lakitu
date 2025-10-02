@@ -30,6 +30,29 @@ export function initAuth() {
     },
   };
   Amplify.configure(config);
+
+  // Finalize Hosted UI redirect if we were just sent back with ?code=...&state=...
+  completeHostedUiRedirect().catch(() => {
+    /* nothing to finalize / ignore */
+  });
+}
+
+async function completeHostedUiRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("code") && params.has("state")) {
+    // Touch Amplify so it completes the code exchange & stores the session.
+    // In early v6, calling getCurrentUser() or fetchAuthSession() triggers this.
+    try {
+      await getCurrentUser().catch(async () => {
+        await fetchAuthSession();
+      });
+    } finally {
+      // Clean the URL so code/state aren’t left around
+      const url = new URL(window.location.href);
+      url.search = "";
+      window.history.replaceState({}, document.title, url.toString());
+    }
+  }
 }
 
 export async function currentAccessToken(): Promise<string | null> {
