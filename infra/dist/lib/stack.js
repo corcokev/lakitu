@@ -1,7 +1,61 @@
-import { Stack, CfnOutput, Duration, RemovalPolicy, aws_lambda as lambda, aws_dynamodb as dynamodb, aws_cognito as cognito, aws_s3 as s3, aws_cloudfront as cloudfront, aws_cloudfront_origins as origins, aws_s3_deployment as s3deploy, aws_apigateway as apigw, } from "aws-cdk-lib";
+import { Stack, CfnOutput, Duration, RemovalPolicy, Lazy, aws_iam as iam, aws_lambda as lambda, aws_dynamodb as dynamodb, aws_cognito as cognito, aws_s3 as s3, aws_cloudfront as cloudfront, aws_cloudfront_origins as origins, aws_s3_deployment as s3deploy, aws_apigateway as apigw, } from "aws-cdk-lib";
 export class LakituStack extends Stack {
     constructor(scope, id, props) {
         super(scope, id, props);
+        const githubOrg = "corcokev";
+        const githubRepo = "lakitu";
+        const githubBranch = "main";
+        // Trust policy: GitHub Actions OIDC
+        const githubOidcProviderArn = `arn:aws:iam::${this.account}:oidc-provider/token.actions.githubusercontent.com`;
+        const oidcPrincipal = new iam.WebIdentityPrincipal(githubOidcProviderArn, {
+            StringEquals: {
+                "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+            },
+            StringLike: {
+                "token.actions.githubusercontent.com:sub": `repo:${githubOrg}/${githubRepo}:ref:refs/heads/${githubBranch}`,
+            },
+        });
+        // GitHub Actions IAM Role
+        const githubActionsRole = new iam.Role(this, "GitHubActionsRole", {
+            roleName: "GitHubActionsLakituRole",
+            assumedBy: oidcPrincipal,
+            description: "Used by GitHub Actions to deploy Lakitu infra via CDK",
+            maxSessionDuration: Duration.hours(1),
+        });
+        // Permissions: Allow deploy of CDK-tagged resources only
+        githubActionsRole.addToPolicy(new iam.PolicyStatement({
+            actions: [
+                "cloudformation:*",
+                "s3:*",
+                "lambda:*",
+                "dynamodb:*",
+                "apigateway:*",
+                "logs:*",
+                "cloudfront:*",
+                "cognito-idp:*",
+                "iam:Get*",
+                "iam:List*",
+                "sts:GetCallerIdentity",
+                "iam:PassRole",
+            ],
+            resources: ["*"],
+            conditions: {
+                StringEqualsIfExists: {
+                    "aws:RequestTag/Project": "Lakitu",
+                    "aws:ResourceTag/Project": "Lakitu",
+                },
+            },
+        }));
+        // Tighter PassRole condition for CDK bootstrap roles
+        githubActionsRole.addToPolicy(new iam.PolicyStatement({
+            actions: ["iam:PassRole"],
+            resources: [`arn:aws:iam::${this.account}:role/cdk-*`],
+            conditions: {
+                StringEquals: {
+                    "iam:PassedToService": "cloudformation.amazonaws.com",
+                },
+            },
+        }));
         // 1) Data: DynamoDB single-table
         const table = new dynamodb.Table(this, "UserItems", {
             partitionKey: { name: "userId", type: dynamodb.AttributeType.STRING },
@@ -38,9 +92,14 @@ export class LakituStack extends Stack {
             oAuth: {
                 flows: { authorizationCodeGrant: true },
                 scopes: [cognito.OAuthScope.OPENID, cognito.OAuthScope.EMAIL],
-                // NOTE: After first deploy, update these with the CloudFront URL output.
-                callbackUrls: ["http://localhost:5173/", "https://example.com/"],
-                logoutUrls: ["http://localhost:5173/", "https://example.com/"],
+                callbackUrls: [
+                    "http://localhost:5173/",
+                    Lazy.string({ produce: () => `https://${dist.domainName}/` }),
+                ],
+                logoutUrls: [
+                    "http://localhost:5173/",
+                    Lazy.string({ produce: () => `https://${dist.domainName}/` }),
+                ],
             },
         });
         // 3) Compute: Lambda (Java 21) single router handler
@@ -63,7 +122,9 @@ export class LakituStack extends Stack {
             restApiName: "LakituApi",
             deployOptions: { stageName: "prod" },
             defaultCorsPreflightOptions: {
-                allowOrigins: apigw.Cors.ALL_ORIGINS, // tighten to CloudFront domain after deploy
+                allowOrigins: [
+                    Lazy.string({ produce: () => `https://${dist.domainName}/` }),
+                ],
                 allowHeaders: ["Authorization", "Content-Type"],
                 allowMethods: apigw.Cors.ALL_METHODS,
             },
@@ -125,6 +186,10 @@ export class LakituStack extends Stack {
             distribution: dist,
         });
         // 6) Outputs
+        new CfnOutput(this, "GitHubActionsRoleArn", {
+            value: githubActionsRole.roleArn,
+            description: "IAM Role to assume via GitHub Actions OIDC",
+        });
         new CfnOutput(this, "LakituApiBaseUrl", { value: api.url }); // ends with "/"
         new CfnOutput(this, "LakituTableName", { value: table.tableName });
         new CfnOutput(this, "LakituUserPoolId", { value: userPool.userPoolId });
