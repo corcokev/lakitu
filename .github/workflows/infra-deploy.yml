@@ -28,7 +28,7 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsLakituRole
@@ -49,8 +49,8 @@ jobs:
           cd infra
           npx cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID || '' }}/${{ secrets.AWS_REGION }}
 
-      - name: CDK Deploy
+      - name: CDK deploy (app only)
+        working-directory: infra
         run: |
-          cd infra
           npm run build
-          npx cdk deploy --all --require-approval never
+          npx cdk deploy LakituStack --require-approval never
