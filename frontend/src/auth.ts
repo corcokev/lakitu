@@ -29,6 +29,7 @@ export function initAuth() {
       },
     },
   };
+
   Amplify.configure(config);
 
   // Finalize Hosted UI redirect if we were just sent back with ?code=...&state=...
@@ -43,9 +44,22 @@ async function completeHostedUiRedirect() {
     // Touch Amplify so it completes the code exchange & stores the session.
     // In early v6, calling getCurrentUser() or fetchAuthSession() triggers this.
     try {
-      await getCurrentUser().catch(async () => {
-        await fetchAuthSession();
+      await getCurrentUser().catch(async (err) => {
+        // log the error before attempting the session exchange
+        console.warn(
+          "getCurrentUser failed during hosted UI finalization:",
+          err
+        );
+        await fetchAuthSession().catch((e) => {
+          console.error(
+            "fetchAuthSession failed during hosted UI finalization:",
+            e
+          );
+          throw e;
+        });
       });
+    } catch (err) {
+      console.error("Error finalizing hosted UI redirect:", err);
     } finally {
       // Clean the URL so code/state aren’t left around
       const url = new URL(window.location.href);
