@@ -30,7 +30,9 @@ export function initAuth() {
     },
   };
 
-  Amplify.configure(config);
+  // Ensure Amplify uses browser localStorage for persistence (avoid in-memory storage)
+  // Amplify.configure accepts a non-ResourcesConfig object too, so cast to any to satisfy TS.
+  Amplify.configure({ ...(config as any), storage: window.localStorage } as any);
 
   // Finalize Hosted UI redirect if we were just sent back with ?code=...&state=...
   completeHostedUiRedirect().catch(() => {
@@ -63,6 +65,13 @@ async function completeHostedUiRedirect() {
           console.log('fetchAuthSession succeeded during hosted UI finalization:', s);
         } catch (err) {
           console.warn('fetchAuthSession succeeded earlier but reading session now failed:', err);
+        }
+        // Force a refresh to ensure tokens are parsed/stored by the library
+        try {
+          const s2 = await fetchAuthSession({ forceRefresh: true } as any);
+          console.log('fetchAuthSession(forceRefresh:true) result:', s2);
+        } catch (err) {
+          console.warn('fetchAuthSession(forceRefresh) failed:', err);
         }
         try {
           console.log('localStorage keys after hosted UI finalization:', Object.keys(localStorage));
