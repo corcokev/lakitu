@@ -5,6 +5,7 @@ import {
   Duration,
   RemovalPolicy,
   Lazy,
+  ArnFormat,
   aws_iam as iam,
   aws_lambda as lambda,
   aws_dynamodb as dynamodb,
@@ -20,6 +21,70 @@ import { Construct } from "constructs";
 export class LakituStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
+
+    const githubOrg = "corcokev";
+    const githubRepo = "lakitu";
+    const githubBranch = "main";
+
+    // Trust policy: GitHub Actions OIDC
+    const githubOidcProviderArn = `arn:aws:iam::${this.account}:oidc-provider/token.actions.githubusercontent.com`;
+
+    const oidcPrincipal = new iam.WebIdentityPrincipal(githubOidcProviderArn, {
+      StringEquals: {
+        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+      },
+      StringLike: {
+        "token.actions.githubusercontent.com:sub": `repo:${githubOrg}/${githubRepo}:ref:refs/heads/${githubBranch}`,
+      },
+    });
+
+    // GitHub Actions IAM Role
+    const githubActionsRole = new iam.Role(this, "GitHubActionsRole", {
+      roleName: "GitHubActionsLakituRole",
+      assumedBy: oidcPrincipal,
+      description: "Used by GitHub Actions to deploy Lakitu infra via CDK",
+      maxSessionDuration: Duration.hours(1),
+    });
+
+    // Permissions: Allow deploy of CDK-tagged resources only
+    githubActionsRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "cloudformation:*",
+          "s3:*",
+          "lambda:*",
+          "dynamodb:*",
+          "apigateway:*",
+          "logs:*",
+          "cloudfront:*",
+          "cognito-idp:*",
+          "iam:Get*",
+          "iam:List*",
+          "sts:GetCallerIdentity",
+          "iam:PassRole",
+        ],
+        resources: ["*"],
+        conditions: {
+          StringEqualsIfExists: {
+            "aws:RequestTag/Project": "Lakitu",
+            "aws:ResourceTag/Project": "Lakitu",
+          },
+        },
+      })
+    );
+
+    // Tighter PassRole condition for CDK bootstrap roles
+    githubActionsRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["iam:PassRole"],
+        resources: [`arn:aws:iam::${this.account}:role/cdk-*`],
+        conditions: {
+          StringEquals: {
+            "iam:PassedToService": "cloudformation.amazonaws.com",
+          },
+        },
+      })
+    );
 
     // 1) Data: DynamoDB single-table
     const table = new dynamodb.Table(this, "UserItems", {
@@ -176,6 +241,10 @@ export class LakituStack extends Stack {
     });
 
     // 6) Outputs
+    new CfnOutput(this, "GitHubActionsRoleArn", {
+      value: githubActionsRole.roleArn,
+      description: "IAM Role to assume via GitHub Actions OIDC",
+    });
     new CfnOutput(this, "LakituApiBaseUrl", { value: api.url }); // ends with "/"
     new CfnOutput(this, "LakituTableName", { value: table.tableName });
     new CfnOutput(this, "LakituUserPoolId", { value: userPool.userPoolId });
