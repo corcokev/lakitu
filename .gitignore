@@ -23,13 +23,11 @@ yarn-error.log*
 # === CDK (infra) ===
 infra/cdk.out/
 infra/node_modules/
-infra/package-lock.json
 infra/dist/
 
 # === React Frontend ===
 frontend/dist/
 frontend/node_modules/
-frontend/package-lock.json
 frontend/.env*
 frontend/.vite/
 
