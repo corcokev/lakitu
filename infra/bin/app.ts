@@ -6,16 +6,16 @@ import { GithubOidcStack } from "../lib/github.js";
 const app = new App();
 Tags.of(app).add("Project", "Lakitu");
 
-new GithubOidcStack(app, "GithubOidcStack", {
-  env: {
-    account: process.env.CDK_DEFAULT_ACCOUNT,
-    region: process.env.CDK_DEFAULT_REGION,
-  },
-});
+const env = {
+  account: process.env.CDK_DEFAULT_ACCOUNT || process.env.AWS_ACCOUNT_ID,
+  region:
+    process.env.CDK_DEFAULT_REGION || process.env.AWS_REGION || "us-east-1",
+};
+
+new GithubOidcStack(app, "GithubOidcStack", { env });
 
 new LakituStack(app, "LakituStack", {
-  env: {
-    account: process.env.CDK_DEFAULT_ACCOUNT,
-    region: process.env.CDK_DEFAULT_REGION,
-  },
+  env,
+  domainName: process.env.DOMAIN_NAME,
+  hostedZoneId: process.env.HOSTED_ZONE_ID,
 });

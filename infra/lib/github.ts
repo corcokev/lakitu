@@ -68,7 +68,7 @@ export class GithubOidcStack extends Stack {
             "aws:ResourceTag/Project": "Lakitu",
           },
         },
-      })
+      }),
     );
 
     // 5) Allow reading CDK bootstrap version (SSM)
@@ -83,7 +83,7 @@ export class GithubOidcStack extends Stack {
         resources: [
           `arn:aws:ssm:${this.region}:${this.account}:parameter/cdk-bootstrap/*`,
         ],
-      })
+      }),
     );
 
     // 6) Access CDK toolkit buckets (assets upload/download)
@@ -92,7 +92,7 @@ export class GithubOidcStack extends Stack {
         sid: "CdkToolkitBucketList",
         actions: ["s3:GetBucketLocation", "s3:ListBucket"],
         resources: ["arn:aws:s3:::cdk-*-assets-*"],
-      })
+      }),
     );
     ghRole.addToPolicy(
       new iam.PolicyStatement({
@@ -106,7 +106,7 @@ export class GithubOidcStack extends Stack {
           "s3:ListMultipartUploadParts",
         ],
         resources: ["arn:aws:s3:::cdk-*-assets-*/*"],
-      })
+      }),
     );
 
     // 7) Allow PassRole only to CDK bootstrap roles (CloudFormation)
@@ -125,7 +125,7 @@ export class GithubOidcStack extends Stack {
             "iam:PassedToService": "cloudformation.amazonaws.com",
           },
         },
-      })
+      }),
     );
 
     ghRole.addToPolicy(
@@ -141,7 +141,7 @@ export class GithubOidcStack extends Stack {
             "iam:PassedToService": "cloudformation.amazonaws.com",
           },
         },
-      })
+      }),
     );
 
     new CfnOutput(this, "GitHubActionsRoleArn", { value: ghRole.roleArn });
