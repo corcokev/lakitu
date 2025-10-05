@@ -15,13 +15,14 @@ import {
   aws_apigateway as apigw,
 } from "aws-cdk-lib";
 import { Construct } from "constructs";
-
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 export class LakituStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
     // 1) Data: DynamoDB single-table
-    const table = new dynamodb.Table(this, "UserItems", {
+    const userItemsTable = new dynamodb.Table(this, "UserItems", {
       partitionKey: { name: "userId", type: dynamodb.AttributeType.STRING },
       sortKey: { name: "itemId", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -74,31 +75,38 @@ export class LakituStack extends Stack {
     });
 
     // 3) Compute: Lambda (Java 21) single router handler
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
     const handler = new lambda.Function(this, "ApiHandler", {
       runtime: lambda.Runtime.JAVA_21,
       memorySize: 512,
       timeout: Duration.seconds(10),
       handler: "app.handlers.RouterHandler::handleRequest",
-      // Build your fat jar locally into ../backend/build/libs first (shadowJar),
-      // then CDK will pick it up here:
-      code: lambda.Code.fromAsset("../backend/build/libs"),
+      code: lambda.Code.fromAsset(
+        join(__dirname, "../../backend/build/libs/backend-0.1.0-all.jar")
+      ),
       environment: {
-        TABLE_NAME: table.tableName,
+        USER_ITEMS_TABLE_NAME: userItemsTable.tableName,
         POWERTOOLS_SERVICE_NAME: "lakitu",
+        FRONTEND_ORIGIN:
+          "http://localhost:5173,https://d3odzc270i77yq.cloudfront.net",
       },
     });
-    table.grantReadWriteData(handler);
+    userItemsTable.grantReadWriteData(handler);
 
     // 4) API: REST API (L2) + Cognito User Pools Authorizer (L2)
     const api = new apigw.RestApi(this, "RestApi", {
       restApiName: "LakituApi",
       deployOptions: { stageName: "prod" },
-      defaultCorsPreflightOptions: {
-        allowOrigins: [
-          Lazy.string({ produce: () => `https://${dist.domainName}/` }),
-        ],
-        allowHeaders: ["Authorization", "Content-Type"],
-        allowMethods: apigw.Cors.ALL_METHODS,
+    });
+
+    // Add CORS headers to gateway responses for auth errors
+    api.addGatewayResponse("Unauthorized", {
+      type: apigw.ResponseType.UNAUTHORIZED,
+      responseHeaders: {
+        "Access-Control-Allow-Origin": "'http://localhost:5173'",
+        "Access-Control-Allow-Headers": "'Authorization,Content-Type'",
+        "Access-Control-Allow-Methods": "'GET,POST,PUT,PATCH,DELETE,OPTIONS'",
       },
     });
 
@@ -118,17 +126,21 @@ export class LakituStack extends Stack {
     const v1 = api.root.addResource("v1");
     const proxy = v1.addResource("{proxy+}");
 
-    // Protect all routes under /v1/* with Cognito
-    proxy.addMethod("ANY", lambdaIntegration, {
-      authorizationType: apigw.AuthorizationType.COGNITO,
-      authorizer,
+    // Handle all methods explicitly
+    ["GET", "POST", "PUT", "PATCH", "DELETE"].forEach((method) => {
+      proxy.addMethod(method, lambdaIntegration, {
+        authorizationType: apigw.AuthorizationType.COGNITO,
+        authorizer,
+      });
+      v1.addMethod(method, lambdaIntegration, {
+        authorizationType: apigw.AuthorizationType.COGNITO,
+        authorizer,
+      });
     });
 
-    // Optionally, also protect /v1 itself (no trailing path)
-    v1.addMethod("ANY", lambdaIntegration, {
-      authorizationType: apigw.AuthorizationType.COGNITO,
-      authorizer,
-    });
+    // OPTIONS without auth for CORS
+    proxy.addMethod("OPTIONS", lambdaIntegration);
+    v1.addMethod("OPTIONS", lambdaIntegration);
 
     // 5) Static Hosting: S3 + CloudFront (OAI only, pure L2)
     const siteBucket = new s3.Bucket(this, "SiteBucket", {
@@ -176,7 +188,9 @@ export class LakituStack extends Stack {
 
     // 6) Outputs
     new CfnOutput(this, "LakituApiBaseUrl", { value: api.url }); // ends with "/"
-    new CfnOutput(this, "LakituTableName", { value: table.tableName });
+    new CfnOutput(this, "LakituItemsTableName", {
+      value: userItemsTable.tableName,
+    });
     new CfnOutput(this, "LakituUserPoolId", { value: userPool.userPoolId });
     new CfnOutput(this, "LakituUserPoolClientId", {
       value: userPoolClient.userPoolClientId,
